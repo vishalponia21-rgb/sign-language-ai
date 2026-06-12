@@ -1,0 +1,6 @@
+opencv-python-headless
+mediapipe==0.10.11
+scikit-learn
+numpy==1.26.4
+streamlit
+pandas
