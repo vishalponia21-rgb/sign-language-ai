@@ -1,6 +1,7 @@
-opencv-python-headless
-mediapipe==0.10.11
+opencv-python-headless==4.8.0.74
+mediapipe
 scikit-learn
-numpy==1.26.4
+numpy
 streamlit
 pandas
+Pillow
