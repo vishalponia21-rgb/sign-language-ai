@@ -1,63 +1,68 @@
+"""
+test_camera.py — Verify camera access and MediaPipe hand detection.
+Run: python3 test_camera.py
+Press 'q' to quit.
+"""
+
 import cv2
-import mediapipe as mp
-from mediapipe.tasks.python import vision
+import sys
 
-MODEL_PATH = "hand_landmarker.task"
+print("\n🔍  Testing Camera Access…\n")
 
-cap = cv2.VideoCapture(0)
-
-print("Camera chal raha hai! Haath dikhao...")
-print("Band karne ke liye 'q' dabao")
-
-base_options = mp.tasks.BaseOptions(model_asset_path=MODEL_PATH)
-options = vision.HandLandmarkerOptions(
-    base_options=base_options,
-    running_mode=vision.RunningMode.VIDEO,
-    num_hands=2,
-    min_hand_detection_confidence=0.7,
-    min_tracking_confidence=0.5,
-)
-
-hand_landmarker = vision.HandLandmarker.create_from_options(options)
-
-frame_idx = 0
-try:
-    while cap.isOpened():
+# Try indices 0-3
+camera_index = None
+for idx in range(4):
+    cap = cv2.VideoCapture(idx)
+    if cap.isOpened():
         ret, frame = cap.read()
-        if not ret:
-            print("Camera nahi mila!")
+        if ret and frame is not None:
+            print(f"✅  Camera found at index {idx}")
+            print(f"    Resolution: {frame.shape[1]}×{frame.shape[0]}")
+            camera_index = idx
             break
+        cap.release()
+    else:
+        cap.release()
 
-        frame = cv2.flip(frame, 1)
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+if camera_index is None:
+    print("❌  No camera found! Check permissions in System Preferences → Privacy → Camera.")
+    sys.exit(1)
 
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        timestamp_ms = int(frame_idx * (1000.0 / 30.0))
-        result = hand_landmarker.detect_for_video(mp_image, timestamp_ms)
+# Re-open at found index
+cap = cv2.VideoCapture(camera_index)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
-        if result.hand_landmarks:
-            h, w, _ = frame.shape
-            for hand_landmarks in result.hand_landmarks:
-                # 21 points draw karo
-                for landmark in hand_landmarks:
-                    x = int(landmark.x * w)
-                    y = int(landmark.y * h)
-                    cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
+print("\n📷  Live preview — Press 'q' to quit\n")
 
-            cv2.putText(frame, "Haath detect hua! 21 points!", (10, 50),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-        else:
-            cv2.putText(frame, "Haath dikhao...", (10, 50),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        print("❌  Cannot read frame.")
+        break
 
-        cv2.imshow("Sign Language AI - Day 2", frame)
+    frame = cv2.flip(frame, 1)
+    h, w  = frame.shape[:2]
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+    # Overlay guide box
+    cx, cy = w // 2, h // 2
+    box_size = min(w, h) // 3
+    cv2.rectangle(
+        frame,
+        (cx - box_size, cy - box_size),
+        (cx + box_size, cy + box_size),
+        (0, 255, 136), 2,
+    )
+    cv2.putText(frame, "Hold your hand inside this box",
+                (cx - box_size, cy - box_size - 10),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 136), 2)
+    cv2.putText(frame, f"Camera OK — {w}x{h} | Press Q to quit",
+                (15, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
-        frame_idx += 1
-finally:
-    hand_landmarker.close()
-    cap.release()
-    cv2.destroyAllWindows()
-    print("Day 2 Complete! 🎉")
+    cv2.imshow("Camera Test — Sign Language AI", frame)
+    if cv2.waitKey(1) & 0xFF == ord("q"):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
+print("\n✅  Camera test complete.")

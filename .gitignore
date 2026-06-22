@@ -1,6 +1,52 @@
+# Sign Language AI — .gitignore
+
+# ── Virtual environments ──
 venv/
 .venv/
+env/
+.env/
+
+# ── Python cache ──
 __pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# ── Model binaries (large files — use git-lfs if you want to include them) ──
+model.pkl
 *.pkl
+
+# ── NumPy arrays ──
+*.npy
+*.npz
+
+# ── Jupyter ──
+.ipynb_checkpoints/
+
+# ── Environment variables ──
 .env
-*.pyc
+*.env
+
+# ── OS files ──
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE ──
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Logs ──
+*.log
+
+# ── Dataset images (too large for GitHub — 1.2GB) ──
+asl_dataset/
+dataset/
+
+# ── Custom collected data (optional — remove line to include) ──
+custom_data/
+
+# ── Screenshots saved by predict.py ──
+screenshot_*.jpg

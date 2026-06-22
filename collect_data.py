@@ -1,150 +1,150 @@
+"""
+collect_data.py — Collect custom hand sign samples for any label.
+
+Usage:
+  python3 collect_data.py
+
+How it works:
+  1. Choose a label (e.g. 'A' or 'hello')
+  2. Press SPACE when your hand is in position to start recording
+  3. Records SAMPLES_PER_LABEL frames automatically, saving features to CSV
+  4. CSV format: label, x0, y0, z0, x1, y1, z1, … (63 feature cols + 1 label)
+
+The output CSV can be used to retrain or fine-tune the model.
+"""
+
 import cv2
 import mediapipe as mp
 from mediapipe.tasks.python import vision
 import csv
 import os
-import signal
-import sys
+import time
 
-MODEL_PATH = "hand_landmarker.task"
+# ─────────────────────────────────────────────
+#  Config
+# ─────────────────────────────────────────────
+SAMPLES_PER_LABEL = 100
+OUTPUT_DIR        = "custom_data"
+OUTPUT_CSV        = os.path.join(OUTPUT_DIR, "custom_dataset.csv")
+HAND_MODEL_PATH   = "hand_landmarker.task"
 
-# Dataset folder
-os.makedirs("dataset", exist_ok=True)
-CSV_FILE = "dataset/hand_data.csv"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Create CSV if not exists
-if not os.path.exists(CSV_FILE):
-    with open(CSV_FILE, 'w', newline='') as f:
-        writer = csv.writer(f)
-        header = ['label']
-        for i in range(21):
-            header += [f'p{i}_x', f'p{i}_y', f'p{i}_z']
-        writer.writerow(header)
-    print("CSV file created!")
-
-cap = cv2.VideoCapture(0)
-
-base_options = mp.tasks.BaseOptions(model_asset_path=MODEL_PATH)
-options = vision.HandLandmarkerOptions(
-    base_options=base_options,
+# ─────────────────────────────────────────────
+#  MediaPipe setup
+# ─────────────────────────────────────────────
+base_opts = mp.tasks.BaseOptions(model_asset_path=HAND_MODEL_PATH)
+opts = vision.HandLandmarkerOptions(
+    base_options=base_opts,
     running_mode=vision.RunningMode.VIDEO,
     num_hands=1,
-    min_hand_detection_confidence=0.7,
-    min_tracking_confidence=0.5,
+    min_hand_detection_confidence=0.6,
 )
+landmarker = vision.HandLandmarker.create_from_options(opts)
 
-hand_landmarker = vision.HandLandmarker.create_from_options(options)
+HAND_CONNECTIONS = [
+    (0,1),(1,2),(2,3),(3,4),
+    (0,5),(5,6),(6,7),(7,8),
+    (5,9),(9,10),(10,11),(11,12),
+    (9,13),(13,14),(14,15),(15,16),
+    (13,17),(17,18),(18,19),(19,20),(0,17),
+]
 
-current_label = None
-count = 0
-SAMPLES_PER_LABEL = 100
+# ─────────────────────────────────────────────
+#  CSV header
+# ─────────────────────────────────────────────
+header_written = os.path.exists(OUTPUT_CSV) and os.path.getsize(OUTPUT_CSV) > 0
 
-# Graceful shutdown on signals (SIGINT / SIGTERM)
-terminate = False
-def _signal_handler(signum, frame):
-    global terminate
-    print("\nReceived termination signal, exiting gracefully...")
-    terminate = True
+# ─────────────────────────────────────────────
+#  Camera
+# ─────────────────────────────────────────────
+cap = cv2.VideoCapture(0)
+if not cap.isOpened():
+    print("❌  Cannot open camera.")
+    exit(1)
 
-signal.signal(signal.SIGINT, _signal_handler)
-signal.signal(signal.SIGTERM, _signal_handler)
+print("\n🤟  Custom Data Collector — Sign Language AI")
+print("=" * 46)
+print(f"   Output CSV : {OUTPUT_CSV}")
+print(f"   Samples    : {SAMPLES_PER_LABEL} per label")
+print("=" * 46)
 
-print("\n=== Data Collection — 26 Alphabets ===")
-print("Press any letter key (A-Z) to start collecting")
-print("Hold your hand sign for 100 samples")
-print("Press 'q' to quit\n")
+while True:
+    label = input("\nEnter label to collect (e.g. A / B / hello / q to quit): ").strip()
+    if label.lower() == "q":
+        break
+    if not label:
+        continue
 
-# Check existing data
-if os.path.exists(CSV_FILE):
-    with open(CSV_FILE, 'r') as f:
-        rows = list(csv.reader(f))
-    existing = {}
-    for row in rows[1:]:
-        if row:
-            existing[row[0]] = existing.get(row[0], 0) + 1
-    if existing:
-        print("Already collected:")
-        for label, count_ex in sorted(existing.items()):
-            print(f"  {label}: {count_ex} samples ✅")
-    
-    remaining = [chr(i) for i in range(65, 91) if chr(i) not in existing]
-    print(f"\nRemaining: {' '.join(remaining)}\n")
+    print(f"\n  Collecting '{label}' — position your hand, then press SPACE in the window.")
+    print("  Press ESC to skip this label.\n")
 
-frame_idx = 0
-try:
-    while cap.isOpened() and not terminate:
+    collecting   = False
+    count        = 0
+    frame_idx    = 0
+    rows_to_save = []
+
+    while count < SAMPLES_PER_LABEL:
         ret, frame = cap.read()
         if not ret:
             break
 
         frame = cv2.flip(frame, 1)
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w  = frame.shape[:2]
 
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        timestamp_ms = int(frame_idx * (1000.0 / 30.0))
-        result = hand_landmarker.detect_for_video(mp_image, timestamp_ms)
+        rgb    = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        ts_ms  = int(frame_idx * (1000.0 / 30.0))
+        result = landmarker.detect_for_video(mp_img, ts_ms)
+
+        overlay = frame.copy()
 
         if result.hand_landmarks:
-            h, w, _ = frame.shape
-            hand_landmarks = result.hand_landmarks[0]
+            hand = result.hand_landmarks[0]
+            pts  = [(int(lm.x * w), int(lm.y * h)) for lm in hand]
+            for a, b in HAND_CONNECTIONS:
+                cv2.line(overlay, pts[a], pts[b], (0, 180, 220), 2)
+            for x, y in pts:
+                cv2.circle(overlay, (x, y), 5, (0, 255, 136), -1)
 
-            # Draw points
-            for landmark in hand_landmarks:
-                x = int(landmark.x * w)
-                y = int(landmark.y * h)
-                cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
-
-            # Save data if label selected
-            if current_label and count < SAMPLES_PER_LABEL:
-                row = [current_label]
-                for lm in hand_landmarks:
-                    row += [round(lm.x, 4), round(lm.y, 4), round(lm.z, 4)]
-
-                with open(CSV_FILE, 'a', newline='') as f:
-                    writer = csv.writer(f)
-                    writer.writerow(row)
-
+            if collecting:
+                feats = []
+                for lm in hand:
+                    feats.extend([round(lm.x, 4), round(lm.y, 4), round(lm.z, 4)])
+                rows_to_save.append([label] + feats)
                 count += 1
-                cv2.putText(frame, f"Collecting {current_label}: {count}/100", (10, 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-                if count >= SAMPLES_PER_LABEL:
-                    print(f"✅ '{current_label}' — 100 samples saved!")
-                    current_label = None
-                    count = 0
+                # Progress bar
+                bar_w = int((count / SAMPLES_PER_LABEL) * (w - 40))
+                cv2.rectangle(overlay, (20, h - 40), (20 + bar_w, h - 20), (0, 255, 136), -1)
+                cv2.rectangle(overlay, (20, h - 40), (w - 20, h - 20), (100, 100, 100), 2)
 
-            elif current_label is None:
-                cv2.putText(frame, "Press a letter key to collect", (10, 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+        status = f"RECORDING '{label}'  {count}/{SAMPLES_PER_LABEL}" if collecting else f"Ready — Press SPACE to start  |  Label: {label}"
+        col = (0, 255, 136) if collecting else (0, 200, 255)
+        cv2.putText(overlay, status, (15, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.7, col, 2)
 
-        else:
-            cv2.putText(frame, "Show your hand...", (10, 50),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-
-        # Show current label big
-        if current_label:
-            cv2.putText(frame, current_label, (frame.shape[1]//2 - 30, frame.shape[0] - 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 255, 255), 5)
-
-        cv2.imshow("Data Collection - A to Z", frame)
-
+        cv2.imshow("Data Collector — Sign Language AI", overlay)
         key = cv2.waitKey(1) & 0xFF
-        if terminate:
+        if key == ord(" "):
+            collecting = True
+        elif key == 27:          # ESC
+            print("  ⏭  Skipped.")
             break
-        if key == ord('q'):
-            break
-        elif 97 <= key <= 122:  # a-z
-            current_label = chr(key).upper()
-            count = 0
-            print(f"Collecting '{current_label}' — show your hand sign!")
-        elif 65 <= key <= 90:  # A-Z
-            current_label = chr(key)
-            count = 0
-            print(f"Collecting '{current_label}' — show your hand sign!")
 
         frame_idx += 1
-finally:
-    hand_landmarker.close()
-    cap.release()
-    cv2.destroyAllWindows()
-    print("\nData collection complete!")
+
+    if rows_to_save:
+        with open(OUTPUT_CSV, "a", newline="") as f:
+            writer = csv.writer(f)
+            if not header_written:
+                cols = ["label"] + [f"{c}{i}" for i in range(21) for c in ["x","y","z"]]
+                writer.writerow(cols)
+                header_written = True
+            writer.writerows(rows_to_save)
+        print(f"  ✅  Saved {len(rows_to_save)} samples for '{label}' → {OUTPUT_CSV}")
+
+cv2.destroyAllWindows()
+landmarker.close()
+cap.release()
+print("\n✅  Data collection complete.")
+print(f"   CSV saved to: {OUTPUT_CSV}")
